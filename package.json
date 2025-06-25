@@ -14,7 +14,7 @@
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-navigation/bottom-tabs": "^7.2.0",
     "@react-navigation/native": "^7.0.14",
-    "expo": "^50.0.0", // Compatible with React Native 0.72.x
+    "expo": "^50.0.0", 
     "expo-blur": "~12.7.0",
     "expo-camera": "~13.3.2",
     "expo-constants": "~14.3.3",
@@ -32,7 +32,7 @@
     "lucide-react-native": "^0.475.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "react-native": "0.72.4", // Correct version for React 18
+    "react-native": "0.72.4",
     "react-native-gesture-handler": "~2.12.0",
     "react-native-reanimated": "~3.6.0",
     "react-native-safe-area-context": "4.6.3",

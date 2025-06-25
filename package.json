@@ -16,7 +16,7 @@
     "@react-navigation/native": "^7.0.14",
     "expo": "^50.0.0", 
     "expo-blur": "~12.7.0",
-    "expo-camera": "~13.3.1",
+    "expo-camera": "~13.3.2",
     "expo-constants": "~14.3.3",
     "expo-font": "~11.3.2",
     "expo-haptics": "~12.4.0",

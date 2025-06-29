@@ -1,4 +1,18 @@
 import { Platform } from 'react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
+
+export interface APIDetection {
+  label: string;
+  confidence: number;
+  bbox: [number, number, number, number]; // [x1, y1, x2, y2] in pixels
+}
+
+export interface APIDetectionResponse {
+  detections: APIDetection[];
+  image_width: number;
+  image_height: number;
+  processing_time: number;
+}
 
 export interface Detection {
   id: string;
@@ -6,10 +20,10 @@ export interface Detection {
   confidence: number;
   distance: number; // in meters
   steps: number;
-  x: number; // 0-1 normalized position
-  y: number; // 0-1 normalized position
-  width: number;
-  height: number;
+  x: number; // 0-1 normalized position (center)
+  y: number; // 0-1 normalized position (center)
+  width: number; // 0-1 normalized width
+  height: number; // 0-1 normalized height
   timestamp: number;
   isMoving?: boolean;
   velocity?: number; // m/s
@@ -31,21 +45,22 @@ export interface ProcessedAlert {
   alertType: 'urgent' | 'warning' | 'info';
 }
 
-export interface AIModelConfig {
-  modelUrl?: string;
+export interface DetectionServiceConfig {
+  apiUrl: string;
   confidenceThreshold: number;
-  iouThreshold: number;
-  maxDetections: number;
-  inputSize: number;
+  maxRetries: number;
+  timeoutMs: number;
+  centerFocusOnly: boolean;
 }
 
-export class AIDetectionService {
+export class APIDetectionService {
   private stepLength = 65; // centimeters
   private lastAlerts: Map<string, number> = new Map();
   private objectTracker: Map<string, Detection[]> = new Map();
   private alertCooldowns: Map<string, number> = new Map();
-  private isModelLoaded = false;
-  private model: any = null;
+  private isApiAvailable = false;
+  private lastApiCheck = 0;
+  private readonly API_CHECK_INTERVAL = 30000; // 30 seconds
   
   // Enhanced configuration
   private readonly CENTER_FOV_THRESHOLD = 0.25; // 25% from center (50% total width)
@@ -57,106 +72,232 @@ export class AIDetectionService {
   private readonly MOVEMENT_THRESHOLD = 0.05; // 5% movement to consider object moving
   
   // Priority object categories
-  private readonly CRITICAL_OBJECTS = ['person', 'car', 'bicycle', 'motorcycle', 'truck'];
-  private readonly WARNING_OBJECTS = ['chair', 'table', 'door', 'pole', 'stairs', 'step'];
-  private readonly INFO_OBJECTS = ['wall', 'tree', 'bench', 'trash can', 'sign'];
+  private readonly CRITICAL_OBJECTS = ['person', 'car', 'bicycle', 'motorcycle', 'truck', 'bus'];
+  private readonly WARNING_OBJECTS = ['chair', 'table', 'door', 'pole', 'stairs', 'step', 'bench'];
+  private readonly INFO_OBJECTS = ['wall', 'tree', 'trash can', 'sign', 'bottle', 'cup'];
 
-  constructor(stepLength: number = 65, private config: AIModelConfig = {
-    confidenceThreshold: 0.6,
-    iouThreshold: 0.5,
-    maxDetections: 10,
-    inputSize: 416
-  }) {
+  // Distance estimation mapping (object type -> typical size in meters)
+  private readonly OBJECT_SIZES: Record<string, number> = {
+    person: 1.7,
+    car: 4.5,
+    bicycle: 1.8,
+    motorcycle: 2.0,
+    truck: 8.0,
+    bus: 12.0,
+    chair: 0.8,
+    table: 1.2,
+    door: 2.0,
+    pole: 0.2,
+    bench: 1.5,
+    bottle: 0.25,
+    cup: 0.1,
+    // Default fallback
+    default: 1.0
+  };
+
+  constructor(
+    stepLength: number = 65, 
+    private config: DetectionServiceConfig = {
+      apiUrl: 'http://localhost:8000', // Default FastAPI URL
+      confidenceThreshold: 0.6,
+      maxRetries: 2,
+      timeoutMs: 5000,
+      centerFocusOnly: true
+    }
+  ) {
     this.stepLength = stepLength;
-    this.initializeAI();
+    this.checkApiAvailability();
   }
 
-  private async initializeAI() {
+  private async checkApiAvailability(): Promise<boolean> {
+    const now = Date.now();
+    
+    // Only check API availability every 30 seconds to avoid spam
+    if (now - this.lastApiCheck < this.API_CHECK_INTERVAL && this.isApiAvailable) {
+      return this.isApiAvailable;
+    }
+
     try {
-      if (Platform.OS === 'web') {
-        // Web-based AI initialization
-        await this.initializeWebAI();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+      const response = await fetch(`${this.config.apiUrl}/health`, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      clearTimeout(timeoutId);
+      this.isApiAvailable = response.ok;
+      this.lastApiCheck = now;
+      
+      if (this.isApiAvailable) {
+        console.log('✅ Detection API is available');
       } else {
-        // Mobile AI initialization
-        await this.initializeMobileAI();
+        console.warn('⚠️ Detection API returned error status:', response.status);
       }
+      
+      return this.isApiAvailable;
     } catch (error) {
-      console.warn('AI initialization failed, falling back to enhanced simulation:', error);
-      this.isModelLoaded = false;
+      console.warn('⚠️ Detection API is not available:', error);
+      this.isApiAvailable = false;
+      this.lastApiCheck = now;
+      return false;
     }
   }
 
-  private async initializeWebAI() {
+  async processImageForDetection(imageUri: string): Promise<ProcessedAlert[]> {
     try {
-      // For web, we'll use a lightweight object detection approach
-      // This could be replaced with actual TensorFlow.js models
-      console.log('Initializing web-based AI detection...');
+      // Check if API is available
+      const apiAvailable = await this.checkApiAvailability();
       
-      // Simulate model loading
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      this.isModelLoaded = true;
-      console.log('Web AI detection ready');
-    } catch (error) {
-      console.error('Web AI initialization failed:', error);
-      throw error;
-    }
-  }
+      if (!apiAvailable) {
+        console.log('📱 API unavailable, using enhanced simulation');
+        return this.processSimulatedDetections();
+      }
 
-  private async initializeMobileAI() {
-    try {
-      // Mobile-specific AI initialization would go here
-      // This would typically involve loading TensorFlow Lite models
-      console.log('Initializing mobile AI detection...');
+      // Process the image and send to API
+      const detections = await this.sendImageToAPI(imageUri);
       
-      // Simulate model loading
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      this.isModelLoaded = true;
-      console.log('Mobile AI detection ready');
-    } catch (error) {
-      console.error('Mobile AI initialization failed:', error);
-      throw error;
-    }
-  }
-
-  updateStepLength(length: number) {
-    this.stepLength = length;
-  }
-
-  // Main processing function with enhanced AI filtering
-  async processDetections(frameData?: any): Promise<ProcessedAlert[]> {
-    try {
-      let rawDetections: Detection[];
-      
-      if (this.isModelLoaded && frameData) {
-        rawDetections = await this.runAIDetection(frameData);
-      } else {
-        // Enhanced simulation with realistic patterns
-        rawDetections = this.generateRealisticDetections();
+      if (detections.length === 0) {
+        return [];
       }
 
       // Apply comprehensive filtering pipeline
-      const filteredDetections = this.applyDetectionPipeline(rawDetections);
+      const filteredDetections = this.applyDetectionPipeline(detections);
       const alerts = this.generateSmartAlerts(filteredDetections);
       
       return alerts;
     } catch (error) {
-      console.error('Detection processing failed:', error);
-      return [];
+      console.error('🚨 Detection processing failed:', error);
+      // Fallback to simulation on error
+      return this.processSimulatedDetections();
     }
   }
 
-  private async runAIDetection(frameData: any): Promise<Detection[]> {
-    // This would contain actual AI model inference
-    // For now, return enhanced simulation
-    return this.generateRealisticDetections();
+  private async sendImageToAPI(imageUri: string): Promise<Detection[]> {
+    try {
+      // Resize image for faster processing
+      const manipulatedImage = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [{ resize: { width: 640, height: 480 } }], // Standard detection size
+        { 
+          compress: 0.8, 
+          format: ImageManipulator.SaveFormat.JPEG,
+          base64: true 
+        }
+      );
+
+      if (!manipulatedImage.base64) {
+        throw new Error('Failed to convert image to base64');
+      }
+
+      // Send to FastAPI backend
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.config.timeoutMs);
+
+      const response = await fetch(`${this.config.apiUrl}/detect`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: manipulatedImage.base64,
+          confidence_threshold: this.config.confidenceThreshold,
+          center_focus_only: this.config.centerFocusOnly
+        }),
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      }
+
+      const apiResponse: APIDetectionResponse = await response.json();
+      
+      // Convert API detections to our format
+      return this.convertAPIDetections(apiResponse);
+    } catch (error) {
+      console.error('🚨 API request failed:', error);
+      throw error;
+    }
+  }
+
+  private convertAPIDetections(apiResponse: APIDetectionResponse): Detection[] {
+    const { detections, image_width, image_height } = apiResponse;
+    const now = Date.now();
+
+    return detections.map((apiDetection, index) => {
+      const [x1, y1, x2, y2] = apiDetection.bbox;
+      
+      // Convert pixel coordinates to normalized coordinates
+      const centerX = (x1 + x2) / 2 / image_width;
+      const centerY = (y1 + y2) / 2 / image_height;
+      const width = (x2 - x1) / image_width;
+      const height = (y2 - y1) / image_height;
+
+      // Estimate distance based on object size and type
+      const distance = this.estimateDistance(apiDetection.label, height, image_height);
+      const steps = this.metersToSteps(distance);
+
+      return {
+        id: `api_${apiDetection.label}_${now}_${index}`,
+        label: apiDetection.label,
+        confidence: apiDetection.confidence,
+        distance,
+        steps,
+        x: centerX,
+        y: centerY,
+        width,
+        height,
+        timestamp: now,
+        boundingBox: {
+          x: x1 / image_width,
+          y: y1 / image_height,
+          width,
+          height
+        }
+      };
+    });
+  }
+
+  private estimateDistance(objectLabel: string, normalizedHeight: number, imageHeight: number): number {
+    // Get expected real-world size of the object
+    const realWorldSize = this.OBJECT_SIZES[objectLabel] || this.OBJECT_SIZES.default;
+    
+    // Simple distance estimation based on object height in image
+    // This is a rough approximation - in reality you'd need camera calibration
+    const pixelHeight = normalizedHeight * imageHeight;
+    
+    // Rough formula: distance = (real_size * focal_length) / pixel_size
+    // Using estimated focal length for mobile cameras (~500-800 pixels)
+    const estimatedFocalLength = 600;
+    const estimatedDistance = (realWorldSize * estimatedFocalLength) / pixelHeight;
+    
+    // Clamp distance to reasonable range (0.5m to 20m)
+    return Math.max(0.5, Math.min(20, estimatedDistance));
+  }
+
+  private async processSimulatedDetections(): Promise<ProcessedAlert[]> {
+    // Enhanced simulation for when API is unavailable
+    const rawDetections = this.generateRealisticDetections();
+    const filteredDetections = this.applyDetectionPipeline(rawDetections);
+    const alerts = this.generateSmartAlerts(filteredDetections);
+    return alerts;
   }
 
   private applyDetectionPipeline(detections: Detection[]): Detection[] {
     // Step 1: Filter by confidence
-    let filtered = detections.filter(d => d.confidence >= this.MIN_CONFIDENCE);
+    let filtered = detections.filter(d => d.confidence >= this.config.confidenceThreshold);
     
-    // Step 2: Filter by center field of view
-    filtered = this.filterCenterFOV(filtered);
+    // Step 2: Filter by center field of view (if enabled)
+    if (this.config.centerFocusOnly) {
+      filtered = this.filterCenterFOV(filtered);
+    }
     
     // Step 3: Update object tracking
     this.updateObjectTracking(filtered);
@@ -513,7 +654,7 @@ export class AIDetectionService {
     const velocity = isMoving ? Math.random() * 1.5 + 0.5 : 0; // 0.5-2 m/s
     
     return {
-      id: `${label}_${timestamp}_${Math.random().toString(36).substr(2, 5)}`,
+      id: `sim_${label}_${timestamp}_${Math.random().toString(36).substr(2, 5)}`,
       label,
       confidence: Math.min(confidence, 1.0),
       distance,
@@ -564,25 +705,30 @@ export class AIDetectionService {
   }
 
   // Public methods for external use
-  getModelStatus(): { loaded: boolean; platform: string } {
+  updateStepLength(length: number) {
+    this.stepLength = length;
+  }
+
+  updateConfiguration(newConfig: Partial<DetectionServiceConfig>) {
+    this.config = { ...this.config, ...newConfig };
+  }
+
+  getServiceStatus(): { 
+    apiAvailable: boolean; 
+    lastCheck: number; 
+    config: DetectionServiceConfig;
+    platform: string;
+  } {
     return {
-      loaded: this.isModelLoaded,
+      apiAvailable: this.isApiAvailable,
+      lastCheck: this.lastApiCheck,
+      config: this.config,
       platform: Platform.OS
     };
   }
 
-  async reinitializeModel(): Promise<boolean> {
-    try {
-      await this.initializeAI();
-      return this.isModelLoaded;
-    } catch (error) {
-      console.error('Model reinitialization failed:', error);
-      return false;
-    }
-  }
-
-  updateConfiguration(newConfig: Partial<AIModelConfig>) {
-    this.config = { ...this.config, ...newConfig };
+  async testApiConnection(): Promise<boolean> {
+    return await this.checkApiAvailability();
   }
 
   clearTrackingData() {

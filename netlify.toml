@@ -4,8 +4,8 @@
   status = 200
 
 [build]
-  publish = "dist"
-  command = "npm run build"
+  publish = "web-build"
+  command = "npm install --legacy-peer-deps && npm run build:web"
 
 [build.environment]
   NODE_VERSION = "18"

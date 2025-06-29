@@ -24,7 +24,7 @@
     "expo-camera": "^13.3.0",
     "expo-constants": "~17.1.3",
     "expo-font": "~13.2.2",
-    "expo-gl": "~15.1.2",
+    "expo-gl": "^13.0.1",
     "expo-gl-cpp": "~15.1.2",
     "expo-haptics": "~14.1.3",
     "expo-linear-gradient": "~14.1.3",

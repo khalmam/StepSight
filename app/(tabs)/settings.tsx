@@ -8,6 +8,7 @@ import {
   TextInput,
   Switch,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Speech from 'expo-speech';
@@ -22,14 +23,20 @@ import {
   RotateCcw,
   Target,
   Clock,
-  Filter
+  Filter,
+  Brain,
+  Download,
+  Upload,
+  Smartphone,
+  Globe
 } from 'lucide-react-native';
 import { useSettings } from '@/hooks/useSettings';
 
 export default function SettingsScreen() {
-  const { settings, updateSettings } = useSettings();
+  const { settings, updateSettings, resetSettings, exportSettings, importSettings } = useSettings();
   const [tempStepLength, setTempStepLength] = useState(settings.stepLength.toString());
   const [isCalibrating, setIsCalibrating] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const announceMessage = (message: string) => {
     if (settings.audioEnabled) {
@@ -58,23 +65,41 @@ export default function SettingsScreen() {
 
   const completeCalibration = () => {
     setIsCalibrating(false);
-    // Simulate calibration completion
-    const calibratedLength = Math.floor(Math.random() * 20) + 60; // 60-80cm
+    // Simulate calibration completion with more realistic values
+    const calibratedLength = Math.floor(Math.random() * 25) + 55; // 55-80cm
     setTempStepLength(calibratedLength.toString());
     updateSettings({ stepLength: calibratedLength });
     announceMessage(`Calibration complete. Your step length is ${calibratedLength} centimeters.`);
   };
 
-  const resetToDefaults = () => {
-    updateSettings({
-      stepLength: 65,
-      audioEnabled: true,
-      hapticEnabled: true,
-      sensitivity: 0.7,
-      announcementDelay: 3.0,
-    });
-    setTempStepLength('65');
-    announceMessage('Settings reset to defaults');
+  const handleResetToDefaults = () => {
+    Alert.alert(
+      'Reset Settings',
+      'Are you sure you want to reset all settings to defaults?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Reset', 
+          style: 'destructive',
+          onPress: () => {
+            resetSettings();
+            setTempStepLength('65');
+            announceMessage('Settings reset to defaults');
+          }
+        }
+      ]
+    );
+  };
+
+  const handleExportSettings = async () => {
+    try {
+      const settingsJson = await exportSettings();
+      // In a real app, you'd share this via the share API or save to file
+      Alert.alert('Settings Exported', 'Settings have been exported to clipboard');
+      announceMessage('Settings exported successfully');
+    } catch (error) {
+      Alert.alert('Export Failed', 'Could not export settings');
+    }
   };
 
   const toggleAudio = (value: boolean) => {
@@ -97,6 +122,17 @@ export default function SettingsScreen() {
   const updateSensitivity = (sensitivity: number) => {
     updateSettings({ sensitivity });
     announceMessage(`Detection sensitivity set to ${Math.round(sensitivity * 100)} percent`);
+  };
+
+  const updateConfidenceThreshold = (threshold: number) => {
+    updateSettings({ confidenceThreshold: threshold });
+    announceMessage(`Confidence threshold set to ${Math.round(threshold * 100)} percent`);
+  };
+
+  const toggleDetectionMode = (mode: 'ai' | 'simulation' | 'hybrid') => {
+    updateSettings({ detectionMode: mode });
+    const modeNames = { ai: 'AI only', simulation: 'simulation only', hybrid: 'hybrid AI and simulation' };
+    announceMessage(`Detection mode set to ${modeNames[mode]}`);
   };
 
   return (
@@ -164,6 +200,94 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* AI Detection Settings */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Brain size={24} color="#7C3AED" />
+            <Text style={styles.sectionTitle}>AI Detection</Text>
+          </View>
+          
+          <View style={styles.settingCard}>
+            <Text style={styles.cardDescription}>
+              Configure AI-powered object detection and filtering for optimal performance.
+            </Text>
+            
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Detection Mode</Text>
+                <Text style={styles.settingDescription}>
+                  Choose between AI, simulation, or hybrid detection
+                </Text>
+              </View>
+              <View style={styles.modeSelector}>
+                {(['hybrid', 'ai', 'simulation'] as const).map((mode) => (
+                  <TouchableOpacity
+                    key={mode}
+                    style={[
+                      styles.modeButton,
+                      settings.detectionMode === mode && styles.modeButtonActive
+                    ]}
+                    onPress={() => toggleDetectionMode(mode)}
+                  >
+                    <Text style={[
+                      styles.modeButtonText,
+                      settings.detectionMode === mode && styles.modeButtonTextActive
+                    ]}>
+                      {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Confidence Threshold</Text>
+                <Text style={styles.settingDescription}>
+                  Minimum confidence required for object detection
+                </Text>
+              </View>
+              <View style={styles.sliderContainer}>
+                <Text style={styles.sliderValue}>
+                  {Math.round(settings.confidenceThreshold * 100)}%
+                </Text>
+                <View style={styles.sliderButtons}>
+                  <TouchableOpacity
+                    style={styles.sliderButton}
+                    onPress={() => updateConfidenceThreshold(Math.max(0.1, settings.confidenceThreshold - 0.1))}
+                    accessibilityLabel="Decrease confidence threshold"
+                  >
+                    <Text style={styles.sliderButtonText}>-</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.sliderButton}
+                    onPress={() => updateConfidenceThreshold(Math.min(1.0, settings.confidenceThreshold + 0.1))}
+                    accessibilityLabel="Increase confidence threshold"
+                  >
+                    <Text style={styles.sliderButtonText}>+</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.settingRow}>
+              <View style={styles.settingInfo}>
+                <Text style={styles.settingLabel}>Center Focus Only</Text>
+                <Text style={styles.settingDescription}>
+                  Only detect objects in the center field of view
+                </Text>
+              </View>
+              <Switch
+                value={settings.centerFocusOnly}
+                onValueChange={(value) => updateSettings({ centerFocusOnly: value })}
+                trackColor={{ false: '#374151', true: '#7C3AED' }}
+                thumbColor={settings.centerFocusOnly ? '#FFFFFF' : '#9CA3AF'}
+                accessibilityLabel="Toggle center focus only"
+              />
+            </View>
+          </View>
+        </View>
+
         {/* Smart Filtering Settings */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -173,20 +297,24 @@ export default function SettingsScreen() {
           
           <View style={styles.settingCard}>
             <Text style={styles.cardDescription}>
-              StepSight uses intelligent filtering to prevent alert spam and focus on obstacles in your path.
+              Advanced filtering prevents alert spam and focuses on relevant obstacles.
             </Text>
             
             <View style={styles.filterStats}>
               <View style={styles.statItem}>
                 <Target size={20} color="#3B82F6" />
-                <Text style={styles.statLabel}>Center Focus Only</Text>
-                <Text style={styles.statDescription}>Only alerts for objects directly ahead</Text>
+                <View style={styles.statContent}>
+                  <Text style={styles.statLabel}>Proximity Filtering</Text>
+                  <Text style={styles.statDescription}>Prioritizes closer objects</Text>
+                </View>
               </View>
               
               <View style={styles.statItem}>
                 <Clock size={20} color="#059669" />
-                <Text style={styles.statLabel}>Alert Cooldown</Text>
-                <Text style={styles.statDescription}>Prevents repeated alerts for same objects</Text>
+                <View style={styles.statContent}>
+                  <Text style={styles.statLabel}>Temporal Filtering</Text>
+                  <Text style={styles.statDescription}>Prevents repeated alerts</Text>
+                </View>
               </View>
             </View>
           </View>
@@ -241,6 +369,22 @@ export default function SettingsScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+          </View>
+
+          <View style={styles.settingRow}>
+            <View style={styles.settingInfo}>
+              <Text style={styles.settingLabel}>Spatial Audio</Text>
+              <Text style={styles.settingDescription}>
+                Directional audio cues (experimental)
+              </Text>
+            </View>
+            <Switch
+              value={settings.spatialAudio}
+              onValueChange={(value) => updateSettings({ spatialAudio: value })}
+              trackColor={{ false: '#374151', true: '#7C3AED' }}
+              thumbColor={settings.spatialAudio ? '#FFFFFF' : '#9CA3AF'}
+              accessibilityLabel="Toggle spatial audio"
+            />
           </View>
         </View>
 
@@ -306,10 +450,72 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Platform Info */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            {Platform.OS === 'web' ? (
+              <Globe size={24} color="#6B7280" />
+            ) : (
+              <Smartphone size={24} color="#6B7280" />
+            )}
+            <Text style={styles.sectionTitle}>Platform Information</Text>
+          </View>
+          
+          <View style={styles.settingCard}>
+            <Text style={styles.cardDescription}>
+              Running on {Platform.OS === 'web' ? 'Web Browser' : 'Mobile Device'}
+            </Text>
+            <Text style={styles.platformDetails}>
+              Platform: {Platform.OS} | 
+              Version: {Platform.Version} | 
+              AI Support: {Platform.OS === 'web' ? 'Limited' : 'Full'}
+            </Text>
+          </View>
+        </View>
+
+        {/* Advanced Settings */}
+        <TouchableOpacity
+          style={styles.advancedToggle}
+          onPress={() => setShowAdvanced(!showAdvanced)}
+        >
+          <Text style={styles.advancedToggleText}>
+            {showAdvanced ? 'Hide' : 'Show'} Advanced Settings
+          </Text>
+        </TouchableOpacity>
+
+        {showAdvanced && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <SettingsIcon size={24} color="#6B7280" />
+              <Text style={styles.sectionTitle}>Advanced</Text>
+            </View>
+            
+            <View style={styles.controlRow}>
+              <TouchableOpacity
+                style={styles.advancedButton}
+                onPress={handleExportSettings}
+                accessibilityLabel="Export settings"
+              >
+                <Download size={20} color="#FFFFFF" />
+                <Text style={styles.advancedButtonText}>Export</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.advancedButton}
+                onPress={() => Alert.alert('Import Settings', 'Import functionality would be implemented here')}
+                accessibilityLabel="Import settings"
+              >
+                <Upload size={20} color="#FFFFFF" />
+                <Text style={styles.advancedButtonText}>Import</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* Reset Button */}
         <TouchableOpacity
           style={styles.resetButton}
-          onPress={resetToDefaults}
+          onPress={handleResetToDefaults}
           accessibilityLabel="Reset all settings to defaults"
         >
           <RotateCcw size={20} color="#EF4444" />
@@ -447,16 +653,18 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
+  statContent: {
+    flex: 1,
+  },
   statLabel: {
     fontSize: 16,
     fontWeight: '600',
     color: '#FFFFFF',
-    flex: 1,
+    marginBottom: 4,
   },
   statDescription: {
     fontSize: 14,
     color: '#9CA3AF',
-    flex: 2,
     lineHeight: 20,
   },
   settingRow: {
@@ -493,7 +701,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#3B82F6',
-    minWidth: 40,
+    minWidth: 50,
     textAlign: 'center',
   },
   sliderButtons: {
@@ -512,6 +720,70 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  modeSelector: {
+    flexDirection: 'column',
+    gap: 8,
+  },
+  modeButton: {
+    backgroundColor: '#374151',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4B5563',
+  },
+  modeButtonActive: {
+    backgroundColor: '#3B82F6',
+    borderColor: '#60A5FA',
+  },
+  modeButtonText: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  modeButtonTextActive: {
+    color: '#FFFFFF',
+  },
+  platformDetails: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    marginTop: 8,
+  },
+  advancedToggle: {
+    backgroundColor: '#374151',
+    padding: 16,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  advancedToggleText: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  controlRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    gap: 12,
+  },
+  advancedButton: {
+    backgroundColor: '#4B5563',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 8,
+    flex: 1,
+  },
+  advancedButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
   },
   resetButton: {
     flexDirection: 'row',

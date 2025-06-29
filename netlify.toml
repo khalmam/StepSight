@@ -5,7 +5,8 @@
 
 [build]
   publish = "web-build"
-  command = "npm install --legacy-peer-deps && npm run build:web"
+  command = "npm cache clean --force && npm install --legacy-peer-deps && npm run build:web"
+
 
 [build.environment]
   NODE_VERSION = "18"

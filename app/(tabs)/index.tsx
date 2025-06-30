@@ -5,106 +5,115 @@ import {
   StyleSheet,
   TouchableOpacity,
   Platform,
-  Alert,
 } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
-import * as Speech from 'expo-speech';
-import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  Play,
-  Pause,
-  Volume2,
-  VolumeX,
-  Zap,
-  ZapOff,
-  RotateCcw,
-  TriangleAlert as AlertTriangle,
-  Brain,
-  Wifi,
-  WifiOff,
-  Settings as SettingsIcon
-} from 'lucide-react-native';
-import { useSettings } from '@/hooks/useSettings';
+import { Play, Pause, Volume2, VolumeX, Zap, ZapOff, RotateCcw, Settings as SettingsIcon } from 'lucide-react-native';
 
 export default function CameraScreen() {
-  const { settings, updateSettings } = useSettings();
+  const [permission, requestPermission] = useCameraPermissions();
   const [isActive, setIsActive] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
+  const [facing, setFacing] = useState<CameraType>('back');
 
-  const logMessage = (message: string) => {
-    setLogs((prevLogs) => [message, ...prevLogs.slice(0, 4)]);
-    if (settings.audioEnabled && Platform.OS === 'web') {
-      Speech.speak(message, {
-        language: 'en',
-        pitch: 1.0,
-        rate: 0.8,
-      });
-    }
+  const cameraRef = useRef<CameraView>(null);
+
+  const toggleCamera = () => {
+    console.log('Toggle camera pressed');
+    setIsActive(!isActive);
   };
 
-  useEffect(() => {
-    if (Platform.OS !== 'web') {
-      Alert.alert('Error', 'This screen is configured for web simulation only.');
-    }
-  }, []);
-
-  const toggleScanning = () => {
-    const newState = !isActive;
-    setIsActive(newState);
-    logMessage(newState ? 'Simulation started' : 'Simulation stopped');
+  const toggleAudio = () => {
+    console.log('Toggle audio pressed');
   };
 
-  const simulateDetection = () => {
-    if (!isActive) return;
-    const objects = ['chair', 'table', 'person', 'door'];
-    const object = objects[Math.floor(Math.random() * objects.length)];
-    const distance = Math.floor(Math.random() * 5) + 1;
-    logMessage(`${object} detected in ${distance} steps`);
+  const toggleHaptic = () => {
+    console.log('Toggle haptic pressed');
   };
+
+  const flipCamera = () => {
+    console.log('Flip camera pressed');
+    setFacing(current => (current === 'back' ? 'front' : 'back'));
+  };
+
+  const testConnection = () => {
+    console.log('Test API connection pressed');
+  };
+
+  if (!permission) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text>Loading camera permissions...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (!permission.granted) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text>Camera access is required</Text>
+        <TouchableOpacity onPress={requestPermission} style={styles.permissionButton}>
+          <Text style={styles.permissionButtonText}>Grant Permission</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.centerContent}>
-        <Text style={styles.title}>Web Simulation Mode</Text>
-        <TouchableOpacity
-          style={[styles.mainButton, isActive && styles.mainButtonActive]}
-          onPress={toggleScanning}
-        >
-          {isActive ? (
-            <Pause size={32} color="#FFFFFF" />
-          ) : (
-            <Play size={32} color="#FFFFFF" />
-          )}
-          <Text style={styles.mainButtonText}>{isActive ? 'STOP' : 'START'}</Text>
-        </TouchableOpacity>
+      <View style={styles.cameraContainer}>
+        <CameraView
+          ref={cameraRef}
+          style={styles.camera}
+          facing={facing}
+        />
 
-        <TouchableOpacity
-          style={styles.simulateButton}
-          onPress={simulateDetection}
-          disabled={!isActive}
-        >
-          <Text style={styles.simulateButtonText}>Simulate Detection</Text>
-        </TouchableOpacity>
+        {/* Overlay UI */}
+        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+          {/* Control Panel */}
+          <View style={styles.controlPanel}>
+            <TouchableOpacity
+              style={[styles.mainButton, isActive && styles.mainButtonActive]}
+              onPress={toggleCamera}
+            >
+              {isActive ? (
+                <Pause size={32} color="#FFFFFF" />
+              ) : (
+                <Play size={32} color="#FFFFFF" />
+              )}
+              <Text style={styles.mainButtonText}>{isActive ? 'STOP' : 'START'}</Text>
+            </TouchableOpacity>
 
-        {logs.map((log, index) => (
-          <Text key={index} style={styles.logText}>{log}</Text>
-        ))}
+            <View style={styles.controlRow}>
+              <TouchableOpacity
+                style={styles.controlButton}
+                onPress={toggleAudio}
+              >
+                <Volume2 size={24} color="#FFFFFF" />
+              </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.controlButton}
-          onPress={() => {
-            const newState = !settings.audioEnabled;
-            updateSettings({ audioEnabled: newState });
-            logMessage(newState ? 'Audio enabled' : 'Audio disabled');
-          }}
-        >
-          {settings.audioEnabled ? (
-            <Volume2 size={24} color="#FFFFFF" />
-          ) : (
-            <VolumeX size={24} color="#FFFFFF" />
-          )}
-        </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.controlButton}
+                onPress={toggleHaptic}
+              >
+                <Zap size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.controlButton}
+                onPress={flipCamera}
+              >
+                <RotateCcw size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.controlButton}
+                onPress={testConnection}
+              >
+                <SettingsIcon size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -114,28 +123,35 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#111827',
-    justifyContent: 'center',
   },
-  centerContent: {
+  cameraContainer: {
+    flex: 1,
+  },
+  camera: {
+    flex: 1,
+  },
+  controlPanel: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    padding: 24,
     alignItems: 'center',
-    padding: 20,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-    marginBottom: 20,
   },
   mainButton: {
     backgroundColor: '#374151',
+    height: 80,
+    borderRadius: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 12,
+    justifyContent: 'center',
     marginBottom: 20,
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
   mainButtonActive: {
     backgroundColor: '#3B82F6',
+    borderColor: '#60A5FA',
   },
   mainButtonText: {
     color: '#FFFFFF',
@@ -143,25 +159,34 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 12,
   },
-  simulateButton: {
-    backgroundColor: '#059669',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 20,
-  },
-  simulateButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-  },
-  logText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    marginVertical: 4,
+  controlRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
   },
   controlButton: {
-    marginTop: 20,
     backgroundColor: '#374151',
-    padding: 12,
-    borderRadius: 50,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  permissionButton: {
+    backgroundColor: '#3B82F6',
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 12,
+    minWidth: 200,
+    marginTop: 20,
+    alignSelf: 'center',
+  },
+  permissionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });
